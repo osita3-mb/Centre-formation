@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Centre de formation</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{font-family:sans-serif;margin:0;background:#f4f6f8;color:#222}
+header{background:#1d4ed8;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+main{padding:12px;max-width:700px;margin:auto}
+.card{background:#fff;border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 1px 3px #0002}
+input,select,button{width:100%;padding:10px;margin:4px 0;font-size:16px;box-sizing:border-box;border-radius:6px;border:1px solid #ccc}
+button{background:#1d4ed8;color:#fff;border:0}
+button.s{background:#16a34a;width:auto;padding:6px 10px;font-size:14px}
+.r{display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:6px 0}
+</style></head><body>
+<header><b>Centre de formation</b><span id="out"></span></header>
+<main id="app"></main>
+<script>
+const sb=supabase.createClient("https://fckzffbuwoppiiuwdjjg.supabase.co","sb_publishable_A9tm5LwSZyKIW4R28pYBbw_cWd2arav");
+const $=id=>document.getElementById(id);
+const app=$("app");
+let me=null;
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function start(){
+ const {data:{session}}=await sb.auth.getSession();
+ if(!session){$("out").innerHTML="";return loginView();}
+ me=session.user;
+ $("out").innerHTML='<button class="s" onclick="logout()">Sortir</button>';
+ const {data:p}=await sb.from("profiles").select("role").eq("id",me.id).maybeSingle();
+ p&&p.role==="admin"?adminView():studentView();
+}
+async function logout(){await sb.auth.signOut();start();}
+
+function loginView(){
+ app.innerHTML=`<div class="card"><h3>Connexion</h3>
+ <input id="nm" placeholder="Nom complet (pour l'inscription)">
+ <input id="em" type="email" placeholder="Email">
+ <input id="pw" type="password" placeholder="Mot de passe (6 caractères min.)">
+ <button onclick="login()">Se connecter</button>
+ <button onclick="signup()" style="background:#16a34a">Créer un compte étudiant</button>
+ <p id="msg"></p></div>`;
+}
+async function login(){
+ const {error}=await sb.auth.signInWithPassword({email:$("em").value.trim(),password:$("pw").value});
+ error?$("msg").textContent=error.message:start();
+}
+async function signup(){
+ const {data,error}=await sb.auth.signUp({email:$("em").value.trim(),password:$("pw").value,options:{data:{full_name:$("nm").value}}});
+ if(error)return $("msg").textContent=error.message;
+ if(data.session)start();
+ else $("msg").textContent="Compte créé. Vérifie ton email pour confirmer, puis connecte-toi.";
+}
+
+async function studentView(){
+ const {data:st}=await sb.from("students").select("*").eq("user_id",me.id).maybeSingle();
+ if(!st){
+  app.innerHTML=`<div class="card"><h3>Inscription</h3>
+  <input id="fn" placeholder="Nom complet"><input id="ph" placeholder="Téléphone">
+  <input id="ad" placeholder="Adresse"><input id="bd" type="date">
+  <button onclick="register()">S'inscrire</button></div>`;return;}
+ const {data:en}=await sb.from("enrollments").select("id,formations(name,monthly_price),payments(month,amount,status)").eq("student_id",st.id);
+ const list=(en||[]).map(e=>`<div class="card"><b>${esc(e.formations?.name)}</b> (${e.formations?.monthly_price}/mois)`+
+  (e.payments||[]).map(p=>`<div class="r"><span>${p.month}</span><span>${p.amount}</span><span>${p.status==="paid"?"✅ Payé":"⏳ En attente"}</span></div>`).join("")+`</div>`).join("");
+ app.innerHTML=`<div class="card"><h3>${esc(st.full_name)}</h3><div>${esc(st.phone)} · ${esc(st.address)}</div></div>`+(list||"<div class='card'>Aucune formation pour le moment.</div>");
+}
+async function register(){
+ const {error}=await sb.from("students").insert({user_id:me.id,full_name:$("fn").value,phone:$("ph").value,address:$("ad").value,birth_date:$("bd").value||null});
+ error?alert(error.message):studentView();
+}
+
+async function adminView(){
+ const [s,f,e]=await Promise.all([
+  sb.from("students").select("*").order("full_name"),
+  sb.from("formations").select("*").order("name"),
+  sb.from("enrollments").select("id,students(full_name),formations(name,monthly_price),payments(id,month,amount,status)")]);
+ const S=s.data||[],F=f.data||[],E=e.data||[];
+ app.innerHTML=`
+ <div class="card"><h3>Formations</h3>
+ ${F.map(x=>`<div class="r"><span>${esc(x.name)}</span><span>${x.monthly_price}/mois</span></div>`).join("")}
+ <input id="fnm" placeholder="Nom de la formation"><input id="fpr" type="number" placeholder="Prix mensuel">
+ <button onclick="addF()">Ajouter la formation</button></div>
+ <div class="card"><h3>Étudiants (${S.length})</h3>
+ ${S.map(x=>`<div class="r"><span>${esc(x.full_name)}</span><span>${esc(x.phone)}</span></div>`).join("")}</div>
+ <div class="card"><h3>Inscrire un étudiant</h3>
+ <select id="es">${S.map(x=>`<option value="${x.id}">${esc(x.full_name)}</option>`).join("")}</select>
+ <select id="ef">${F.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
+ <button onclick="enroll()">Inscrire</button></div>
+ <div class="card"><h3>Inscriptions et paiements</h3>
+ ${E.map(x=>`<div style="margin-bottom:10px"><b>${esc(x.students?.full_name)}</b> — ${esc(x.formations?.name)}
+ ${(x.payments||[]).map(p=>`<div class="r"><span>${p.month}</span><span>${p.amount}</span>${p.status==="paid"?"<span>✅</span>":`<button class="s" onclick="pay(${p.id})">Marquer payé</button>`}</div>`).join("")}
+ <button class="s" onclick="addP(${x.id},${x.formations?.monthly_price||0})">+ Paiement du mois</button></div>`).join("")}</div>`;
+}
+async function addF(){const {error}=await sb.from("formations").insert({name:$("fnm").value,monthly_price:Number($("fpr").value)});error?alert(error.message):adminView();}
+async function enroll(){const {error}=await sb.from("enrollments").insert({student_id:Number($("es").value),formation_id:Number($("ef").value)});error?alert(error.message):adminView();}
+async function addP(id,a){const m=new Date().toISOString().slice(0,8)+"01";const {error}=await sb.from("payments").insert({enrollment_id:id,month:m,amount:a});error?alert(error.message):adminView();}
+async function pay(id){const {error}=await sb.from("payments").update({status:
