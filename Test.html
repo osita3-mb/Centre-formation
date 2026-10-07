@@ -1,0 +1,11 @@
+<body style="font-family:sans-serif;font-size:20px;padding:16px">
+<p id="r">Test en cours...</p>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const r=document.getElementById("r");
+if(!window.supabase){r.textContent="❌ Bibliothèque Supabase non chargée"}
+else{
+ const sb=supabase.createClient("https://fckzffbuwoppiiuwdjjg.supabase.co","sb_publishable_A9tm5LwSZyKIW4R28pYBbw_cWd2arav");
+ sb.from("formations").select("*").then(x=>{r.textContent=x.error?"❌ "+x.error.message:"✅ Connexion OK"});
+}
+</script></body>
